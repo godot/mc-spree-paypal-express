@@ -1,4 +1,4 @@
-# Official PayPal Express for Spree
+# Official PayPal Express for Spree - Pavel's fork
 
 [![Build Status](https://secure.travis-ci.org/spree/spree_paypal_express.png?branch=master)](http://travis-ci.org/spree/spree_paypal_express)
 
