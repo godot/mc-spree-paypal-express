@@ -46,6 +46,11 @@ module Spree
       #available shipping based on paypal details
       estimate_shipping_and_taxes
 
+      Rails.logger.level = :error
+      logger.error('@rate_hash=')
+      logger.error(@rate_hash)
+      logger.error('====================')
+      
       payment_methods_atts2 = {}
       @rate_hash.each_with_index do |shipping_method, idx|
         payment_methods_atts2["L_TAXAMT#{idx}"] = @order.tax_total #TODO need to calculate based on shipping method

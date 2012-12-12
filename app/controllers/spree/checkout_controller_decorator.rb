@@ -5,7 +5,7 @@ module Spree
     def paypal_checkout
       load_order
       opts = all_opts(@order, params[:payment_method_id], 'checkout')
-      opts.merge!(address_options(@order))
+      opts.merge!(address_options(@order))      
       @gateway = paypal_gateway
 
       if Spree::Config[:auto_capture]
@@ -28,13 +28,45 @@ module Spree
 
     def paypal_payment
       load_order
-      opts = all_opts(@order, params[:payment_method_id], 'payment')
-      unless payment_method.preferred_cart_checkout
-        opts.merge!(address_options(@order))
-      else
-        opts.merge!(shipping_options)
-      end
 
+      opts = all_opts(@order, params[:payment_method_id], 'payment')
+      #Rails.logger.level = 3
+      #logger.error 'order ='
+      #logger.error(ActiveSupport::JSON.encode(@order))
+      #logger.error('================================')
+      #logger.error 'opts = '
+      #logger.error opts
+      #logger.error('================================')
+      #logger.error 'shipping_options ='
+      #logger.error shipping_options
+      #logger.error 'shipping_options_custom ='
+      #logger.error shipping_options_custom(@order)
+      #logger.error('================================')
+      
+      unless payment_method.preferred_cart_checkout
+       opts.merge!(address_options(@order))
+      else
+        #opts.merge!(shipping_options)
+        opts.merge!(shipping_options_custom(@order))
+      end
+      if opts[:tax] > 0
+        opts[:money] = opts[:subtotal] + opts[:tax] + (@order.adjustment_total * 100).to_i  #opts[:shipping]
+      else
+        opts[:tax] = 0
+        opts[:money] = opts[:subtotal] + opts[:shipping] #(@order.adjustment_total * 100).to_i   + opts[:tax]     
+      end
+      
+      #logger.error 'opts = '
+      #logger.error opts
+      #logger.error('================================')
+      #logger.error('================================')
+      #logger.error('================================')
+      #logger.error('================================')
+      #logger.error('================================')
+      #logger.error 'order ='
+      #logger.error(ActiveSupport::JSON.encode(@order))
+      #logger.error('================================')
+      
       @gateway = paypal_gateway
 
       if Spree::Config[:auto_capture]
@@ -74,6 +106,13 @@ module Spree
                                     :payer_status => @ppx_details.params["payer_status"])
 
         @order.special_instructions = @ppx_details.params["note"]
+        
+        #logger.error('@ppx_details =')
+        #logger.error(ActiveSupport::JSON.encode(@ppx_details))
+        #logger.error('-------------------------')
+        #logger.error('order after paypal =')
+        #logger.error(ActiveSupport::JSON.encode(@order))
+        #logger.error('-------------------------')
 
         unless payment_method.preferred_no_shipping
           ship_address = @ppx_details.address
@@ -130,10 +169,26 @@ module Spree
       load_order
 
       opts = { :token => params[:token], :payer_id => params[:PayerID] }.merge all_opts(@order, params[:payment_method_id], 'payment' )
+      if opts[:tax] < 0
+        opts[:tax] = 0
+      end
+      
       gateway = paypal_gateway
+
+
+      #logger.error('opts =')
+      #logger.error(ActiveSupport::JSON.encode(opts))
+      #logger.error('-------------------------')
+      #logger.error('order before pp finish =')
+      #logger.error(ActiveSupport::JSON.encode(@order))
+      #logger.error('-------------------------')
+      
+
 
       method = Spree::Config[:auto_capture] ? :purchase : :authorize
       ppx_auth_response = gateway.send(method, (@order.total*100).to_i, opts)
+      
+      
 
       paypal_account = Spree::PaypalAccount.find_by_payer_id(params[:PayerID])
 
@@ -297,14 +352,14 @@ module Spree
         credits_total = credits.map {|i| i[:amount] * i[:quantity] }.sum
       end
 
-      unless order.payment_method.preferred_cart_checkout
+      #unless order.payment_method.preferred_cart_checkout
         order_total = (order.total * 100).to_i
         shipping_total = (order.ship_total*100).to_i
-      else
-        shipping_cost = shipping_options[:shipping_options].first[:amount]
-        order_total = (order.total * 100 + (shipping_cost)).to_i
-        shipping_total = (shipping_cost).to_i
-      end
+      #else
+      #  shipping_cost = shipping_options[:shipping_options].first[:amount]
+      #  order_total = (order.total * 100 + (shipping_cost)).to_i
+      #  shipping_total = (shipping_cost).to_i
+      #end
 
       opts = { :return_url        => paypal_confirm_order_checkout_url(order, :payment_method_id => payment_method_id),
                :cancel_return_url => edit_order_checkout_url(order, :state => :payment),
@@ -341,12 +396,40 @@ module Spree
       if spree_current_user.present? && spree_current_user.respond_to?(:addresses) && spree_current_user.addresses.present?
         estimate_shipping_for_user
         shipping_default = @rate_hash_user.map.with_index do |shipping_method, idx|
-          { :default => (idx == 0 ? true : false), 
+          {
+             :default => (idx == 0 ? true : false), 
             :name => shipping_method.name, 
-            :amount => (shipping_method.cost*100).to_i }
+            :amount => (shipping_method.cost*100).to_i
+           }
         end
       else
         shipping_method = ShippingMethod.all.first
+        shipping_default = [{ :default => true, 
+                              :name => shipping_method.name, 
+                              :amount => ((shipping_method.calculator.compute(@order).to_f) * 100).to_i }]
+      end
+
+      {
+        :callback_url      => spree.root_url + "paypal_shipping_update",
+        :callback_timeout  => 6,
+        :callback_version  => '61.0',
+        :shipping_options  => shipping_default
+      }
+    end
+
+    def shipping_options_custom(order)
+      # Uses users address if exists (from spree_address_book or custom implementation), if not uses first shipping method.
+      if spree_current_user.present? && spree_current_user.respond_to?(:addresses) && spree_current_user.addresses.present?
+        estimate_shipping_for_user
+        shipping_default = @rate_hash_user.map.with_index do |shipping_method, idx|
+          {
+             :default => (idx == 0 ? true : false), 
+            :name => shipping_method.name, 
+            :amount => (shipping_method.cost*100).to_i
+           }
+        end
+      else
+        shipping_method = ShippingMethod.find_by_id(order.shipping_method_id)
         shipping_default = [{ :default => true, 
                               :name => shipping_method.name, 
                               :amount => ((shipping_method.calculator.compute(@order).to_f) * 100).to_i }]
@@ -408,22 +491,22 @@ module Spree
 
     # hook to allow applications to load in their own shipping and handling costs
     def flat_rate_shipping_and_handling_options(order, stage)
-      # max_fallback = 0.0
-      # shipping_options = ShippingMethod.all.map do |shipping_method|
-      #           { :name       => "#{shipping_method.name}",
-      #             :amount      => (shipping_method.rate),
-      #             :default     => shipping_method.is_default }
-      #         end
-
-
-      # default_shipping_method = ShippingMethod.find(:first, :conditions => {:is_default => true})
-
-      # opts = { :shipping_options  => shipping_options,
-      #        }
-
-      # #opts[:shipping] = (default_shipping_method.nil? ? 0 : default_shipping_method.fallback_amount) if stage == "checkout"
-
-      # opts
+      #max_fallback = 0.0
+      #shipping_options = ShippingMethod.all.map do |shipping_method|
+      #          { :name       => "#{shipping_method.name}",
+      #            :amount      => (shipping_method.rate),
+      #            :default     => shipping_method.is_default }
+      #        end
+      #
+      #
+      #default_shipping_method = ShippingMethod.find(:first, :conditions => {:is_default => true})
+      #
+      #opts = { :shipping_options  => shipping_options,
+      #       }
+      #
+      ##opts[:shipping] = (default_shipping_method.nil? ? 0 : default_shipping_method.fallback_amount) if stage == "checkout"
+      #
+      #opts
       {}
     end
 
@@ -457,12 +540,15 @@ module Spree
       # shipment_name = @ppx_details.shipping['amount'].chomp(" Shipping")
       # shipment_cost = @ppx_details.shipping['name'].to_f
 
-      shipment_name = @ppx_details.params['UserSelectedOptions']['ShippingOptionName'].chomp(" Shipping")
-      shipment_cost = @ppx_details.params['UserSelectedOptions']['ShippingOptionAmount'].to_f
-      if @order.shipping_method_id.blank? && @order.rate_hash.present?
-        selected_shipping = @order.rate_hash.detect { |v| v['name'] == shipment_name && v['cost'] == shipment_cost }
-        @order.shipping_method_id = selected_shipping.id
+      if @ppx_details.params['UserSelectedOptions']
+        shipment_name = @ppx_details.params['UserSelectedOptions']['ShippingOptionName'].chomp(" Shipping")
+        shipment_cost = @ppx_details.params['UserSelectedOptions']['ShippingOptionAmount'].to_f
+        if @order.shipping_method_id.blank? && @order.rate_hash.present?
+          selected_shipping = @order.rate_hash.detect { |v| v['name'] == shipment_name && v['cost'] == shipment_cost }
+          @order.shipping_method_id = selected_shipping.id
+        end
       end
+      
       @order.shipments.each { |s| s.destroy unless s.shipping_method.available_to_order?(@order) }
       @order.create_shipment!
       @order.update!
