@@ -107,12 +107,12 @@ module Spree
 
         @order.special_instructions = @ppx_details.params["note"]
         
-        #logger.error('@ppx_details =')
-        #logger.error(ActiveSupport::JSON.encode(@ppx_details))
-        #logger.error('-------------------------')
-        #logger.error('order after paypal =')
-        #logger.error(ActiveSupport::JSON.encode(@order))
-        #logger.error('-------------------------')
+        logger.error('@ppx_details =')
+        logger.error(ActiveSupport::JSON.encode(@ppx_details))
+        logger.error('-------------------------')
+        logger.error('order after paypal =')
+        logger.error(ActiveSupport::JSON.encode(@order))
+        logger.error('-------------------------')
 
         unless payment_method.preferred_no_shipping
           ship_address = @ppx_details.address
